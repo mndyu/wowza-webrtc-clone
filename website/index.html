@@ -1,0 +1,45 @@
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<link href="https://fonts.googleapis.com/css?family=Quicksand:400,500,700" rel="stylesheet">
+		<title>WebRTC</title>
+		<style>
+			body {
+				font-family: "Quicksand", sans-serif;
+				font-weight: 400;
+				margin: 4em 10%;
+			}
+		</style>
+		<link rel="stylesheet" type="text/css" href="demo.css">
+		<script src="demo.js"></script>
+	</head>
+	<body>
+		<h1>WebRTC</h1>
+		<p><a href="/">< Home</a></p> 
+
+		<div>
+      <div id="signalingContainer" style="display: none">
+        <input id="localSessionDescription" readonly="true" type="hidden"></input> <br />
+        room ID (視聴時のみ指定): <input id="roomId"></input> <br/>
+        <button onclick="window.startSession()"> セッション開始 </button><br />
+      </div>
+      
+      <br />
+      
+      <h2>Video</h2><br />
+      <video id="video1" width="160" height="120" autoplay muted></video> <br />
+      
+      <button class="createSessionButton" onclick="window.createSession(true)"> 配信 </button>
+      <button class="createSessionButton" onclick="window.createSession(false)"> 視聴 </button><br />
+      
+      <br />
+      
+      <h2>Logs</h2><br />
+			<div id="logs"></div>
+			
+			<h2>Rooms</h2><br />
+			<div id="rooms"></div>
+
+		</div>
+	</body>
+</html>
