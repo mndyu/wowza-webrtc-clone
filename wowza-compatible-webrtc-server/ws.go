@@ -16,7 +16,7 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-func startWsServer(addr string, onGetOffer func(wowza.WsRequest) wowza.SdpContainer, onSendResponse func(wowza.WsRequest) []webrtc.ICECandidateInit) {
+func startWsServer(addr string, onGetOffer func(wowza.WsRequest) (wowza.SdpContainer, string, error), onSendResponse func(wowza.WsRequest) ([]webrtc.ICECandidateInit, error)) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -42,24 +42,39 @@ func startWsServer(addr string, onGetOffer func(wowza.WsRequest) wowza.SdpContai
 
 			switch req.Command {
 			case "getOffer":
-				offerSdp := onGetOffer(req)
-				res = wowza.WsResponse{
-					Status:            200,
-					StatusDescription: "OK",
-					Direction:         "play",
-					Command:           "getOffer",
-					StreamInfo:        req.StreamInfo,
-					Sdp:               offerSdp,
+				offerSdp, sessionID, err := onGetOffer(req)
+				if err != nil {
+					fmt.Println("ws: getOffer error:", err)
+					res = wowza.WsResponse{
+						Status: 500,
+					}
+				} else {
+					req.StreamInfo.SessionID = sessionID
+					res = wowza.WsResponse{
+						Status:            200,
+						StatusDescription: "OK",
+						Direction:         "play",
+						Command:           "getOffer",
+						StreamInfo:        req.StreamInfo,
+						Sdp:               offerSdp,
+					}
 				}
 			case "sendResponse":
-				iceCandidates := onSendResponse(req)
-				res = wowza.WsResponse{
-					Status:            200,
-					StatusDescription: "OK",
-					Direction:         "play",
-					Command:           "sendResponse",
-					StreamInfo:        req.StreamInfo,
-					ICECandidates:     iceCandidates,
+				iceCandidates, err := onSendResponse(req)
+				if err != nil {
+					fmt.Println("ws: sendResponse error:", err)
+					res = wowza.WsResponse{
+						Status: 500,
+					}
+				} else {
+					res = wowza.WsResponse{
+						Status:            200,
+						StatusDescription: "OK",
+						Direction:         "play",
+						Command:           "sendResponse",
+						StreamInfo:        req.StreamInfo,
+						ICECandidates:     iceCandidates,
+					}
 				}
 			}
 
