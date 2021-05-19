@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- <meta
+      http-equiv="origin-trial"
+      data-feature="WebVR (For Chrome M59+)"
+      data-expires="2017-07-28"
+      content="ArFv1ZeTwzkhjNE00uAE+XtiQB41fwqG/TqlFMLrepd9sforQSvQE/tgfIbUMYNuNre4QR1k4/z8xp2mV3dbhwwAAABeeyJvcmlnaW4iOiJodHRwczovL2FmcmFtZS5pbzo0NDMiLCJmZWF0dXJlIjoiV2ViVlIxLjEiLCJleHBpcnkiOjE1MDEyMTcwMDIsImlzU3ViZG9tYWluIjp0cnVlfQ=="
+    /> -->
+    <meta charset="utf-8" />
+    <title>NEWJI VR - WebRTC 360deg プレイヤー (テスト)</title>
+    <meta name="description" content="WebRTC VR" />
+    <!-- <meta
+      aframe-injected=""
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1,shrink-to-fit=no,user-scalable=no,minimal-ui,viewport-fit=cover"
+    /> -->
+    <meta aframe-injected="" name="mobile-web-app-capable" content="yes" />
+    <meta aframe-injected="" name="theme-color" content="black" />
+    <meta name="turbolinks-root" content="/webrtc-player">
+    <meta name="turbolinks-visit-control" content="reload">
+
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js" integrity="sha256-4+XzXVhsDmqanXGHaHvgh1gMQKX40OUvDEBTu8JcmNs=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js" integrity="sha512-3j3VU6WC5rPQB4Ld1jnLV7Kd5xr+cq9avvhwqzbH/taCRNURoeEpoPBK9pDyeukwSxwRPJ8fDgvYXd6SkaZ2TA==" crossorigin="anonymous"></script>
+
+    <script src="webrtc-test.js"></script>
+
+  </head>
+
+  <body>
+
+    <div style="display: flex; justify-content: space-between;">
+
+      <div style="padding: 3rem;">
+    
+        <div>
+          <h3>
+            Wowza ストリーム 設定
+          </h3>
+          <input id="custom-app-name" placeholder="app">
+          <input id="custom-stream-name" placeholder="stream">
+          <input id="custom-signalling-server" placeholder="signalling">
+          <div>
+            <button onclick="reloadScreen()">
+              接続
+            </button>
+          </div>
+          <div>
+            配信状況: <span id="wowza-stream-status"></span>
+          </div>
+        </div>
+    
+        <div style="margin-top: 3rem;">
+          <h3>
+            TURN 設定
+          </h3>
+    
+          <div>
+            <input id="cb-relay" type="checkbox" name="relay" value="hog" checked> <label for="relay">TURN 強制</label>
+          </div>
+    
+          <h4>
+            ポート
+          </h4>
+          <div>
+            <input id="cb-443" type="checkbox" name="443" checked> <label for="443">443 (pion)</label>
+          </div>
+          <div>
+            <input id="cb-extra" type="checkbox" name="extra"> <label for="extra">3478/5349 (coturn)</label>
+          </div>
+    
+          <h4>
+            プロトコル
+          </h4>
+          <div>
+            <input id="cb-udp" type="checkbox" name="udp" checked> <label for="udp">TURN/UDP</label>
+          </div>
+          <div>
+            <input id="cb-tcp" type="checkbox" name="tcp"> <label for="tcp">TURN/TCP</label>
+          </div>
+          <div>
+            <input id="cb-tls" type="checkbox" name="tls"> <label for="tls">TURN/TLS</label>
+          </div>
+    
+          <h4>
+            その他
+          </h4>
+          <div>
+            <input id="cb-local" type="checkbox" name="local"> <label for="local">localhost</label>
+          </div>
+    
+          <div style="display: none;">
+            TURN URL: <input id="custom-turn-url" placeholder="example.com:443">
+          </div>
+    
+          <div>
+            TURN サーバの状態: <span id="turn-connection-state">...</span>
+            <button onclick="checkTurn()">
+              確認
+            </button>
+          </div>
+        </div>
+    
+        <div style="margin-top: 3rem;">
+          <h3>
+            その他
+          </h3>
+    
+          <div>
+            <input id="cb-profile-override" type="checkbox" name="extra" checked> <label for="cb-profile-override">profile 上書き</label>
+          </div>
+        </div>
+    
+      </div>
+    
+    
+      <div style="position: relative;">
+        <div class="left-control-buttons" style="position: absolute;">
+          <div class="control-item" onclick="reloadScreen()">
+            <div>リロード</div>
+          </div>
+        </div>
+        <video id="remoteVideo" autoplay playsinline controls style="width: 60vw;"></video>
+      </div>
+    
+    </div>
+    
+    
+    <div style="display: flex; padding: 3rem;">
+    
+      <div style="margin-top: 5rem;">
+        <h3>
+          シグナリング
+        </h3>
+        <div>
+          signalingState: <span id="signaling-state"></span>
+        </div>
+        <div>
+          offer SDP: profile-level-id: <span id="offer-profile"></span>
+        </div>
+        <div>
+          offer ICE candidates: <span id="offer-ice-candidates"></span>
+        </div>
+        <div>
+          answer SDP: profile-level-id: <span id="answer-profile"></span>
+        </div>
+      </div>
+    
+      <div style="margin-top: 5rem; margin-left: 5rem;">
+        <h3>
+          ICE
+        </h3>
+        <div>
+          iceGatheringState: <span id="ice-gathering-state"></span>
+        </div>
+        <div>
+          iceConnectionState: <span id="ice-connection-state"></span>
+        </div>
+      </div>
+    
+      <div style="margin-top: 5rem; margin-left: 5rem;">
+        <h3>
+          接続状況
+        </h3>
+        <div>
+          connectionState: <span id="connection-state"></span>
+        </div>
+        <div>
+          ストリーム一覧
+        </div>
+      </div>
+    
+    </div>
+    
+    
+    <!-- webrtc-internals stats -->
+    <div>
+      <button onclick="logStats()">
+        stats
+      </button>
+    </div>
+    
+    <div>
+      <div id="0-0">
+      </div>
+    </div>
+    
+    <div>
+      <p id="content-root"></p>
+      <template id="td2-template"><td></td><td></td></template>
+      <template id="summary-template"><td><details><summary></summary></details></td></template>
+      <template id="container-template"><div></div><div><canvas></canvas></div></template>
+      <template id="summary-span-template"><summary><span></span></summary></template>
+      <template id="checkbox-template"><input type=checkbox checked></template>
+      <template id="trth-template"><tbody><tr><th colspan=2></th></tr></tbody></template>
+      <template id="td-colspan-template"><td colspan=2></td></template>
+      <template id="time-event-template"><tbody><tr><th>Time</th><th class="update-log-header-event">Event</th></tr></tbody></template>
+      <template id="dump-template">
+        <div>
+          <a>
+            <button>Download the PeerConnection updates and stats data</button>
+          </a>
+        </div>
+        <p>
+          <label>
+            <input type="checkbox">Enable diagnostic audio recordings
+          </label>
+        </p>
+        <p class="audio-diagnostic-dumps-info">A diagnostic audio recording is used for analyzing audio problems. It consists of several files and contains the audio played out to the speaker (output) and captured from the microphone (input). The data is saved locally. Checking this box will enable recordings of all ongoing input and output audio streams (including non-WebRTC streams) and for future audio streams. When the box is unchecked or this page is closed, all ongoing recordings will be stopped and this recording functionality disabled. Recording audio from multiple tabs is supported as well as multiple recordings from the same tab.</p>
+        <p>When enabling, select a base filename to which the following suffixes will be added:</p>
+        <div>&lt;base filename&gt;.&lt;render process ID&gt;.aec_dump.&lt;AEC dump recording ID&gt;</div>
+        <div>&lt;base filename&gt;.input.&lt;stream recording ID&gt;.wav</div>
+        <div>&lt;base filename&gt;.output.&lt;stream recording ID&gt;.wav</div>
+        <p class="audio-diagnostic-dumps-info">It is recommended to choose a new base filename each time the feature is enabled to avoid ending up with partially overwritten or unusable audio files.</p>
+        <p>
+          <label>
+            <input type="checkbox" disabled>Enable diagnostic packet and event recording
+          </label>
+        </p>
+        <p class="audio-diagnostic-dumps-info">A diagnostic packet and event recording can be used for analyzing various issues related to thread starvation, jitter buffers or bandwidth estimation. Two types of data are logged. First, incoming and outgoing RTP headers and RTCP packets are logged. These do not include any audio or video information, nor any other types of personally identifiable information (so no IP addresses or URLs). Checking this box will enable the recording for ongoing WebRTC calls and for future WebRTC calls. When the box is unchecked or this page is closed, all ongoing recordings will be stopped and this recording functionality will be disabled for future WebRTC calls. Recording in multiple tabs or multiple recordings in the same tab will cause multiple log files to be created. When enabling, a filename for the recording can be entered. The entered filename is used as a base, to which the following suffixes will be appended.</p>
+        <p>&lt;base filename&gt;_&lt;date&gt;_&lt;timestamp&gt;_&lt;render process ID&gt;_&lt;recording ID&gt;</p>
+        <p class="audio-diagnostic-dumps-info">If a file with the same name already exists, it will be overwritten. No more than 5 logfiles  will be created, and each of them is limited to 60MB of storage.  On Android these limits are 3 files of at most 10MB each.  When the limit is reached, the checkbox must be unchecked and  rechecked to resume logging.</p>
+      </template>
+    </div>
+    
+    
+    <!-- log -->
+    <div>
+      <textarea id="log" readonly style="width: 100%; height: 10rem;">
+      </textarea>
+    </div>
+    
+    
+    <!-- metadata -->
+
+    
+    <!-- init -->
+    <script>
+      pageReady();
+    </script>
+    
+  </body>
+</html>
