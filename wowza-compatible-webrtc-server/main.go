@@ -1,17 +1,12 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"os"
-	"time"
+	"sync"
 
 	"example.com/m/wowza"
 	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/pkg/media"
-	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
-	"github.com/pion/webrtc/v3/pkg/media/oggreader"
 )
 
 const (
@@ -23,40 +18,6 @@ func main() {
 	iceCandidateC := make(chan webrtc.ICECandidateInit, 10)
 	offerC := make(chan webrtc.SessionDescription)
 	answerC := make(chan webrtc.SessionDescription)
-
-	onGetOffer := func(req wowza.WsRequest) wowza.SdpContainer {
-		offer := <-offerC
-		return wowza.ConvertSessionDescription(offer)
-	}
-	onSendResponse := func(req wowza.WsRequest) []webrtc.ICECandidateInit {
-		answerC <- wowza.ConvertSdpContainer(req.Sdp)
-
-		iceCandidates := []webrtc.ICECandidateInit{}
-	Loop:
-		for {
-			select {
-			case ic := <-iceCandidateC:
-				iceCandidates = append(iceCandidates, ic)
-			default:
-				break Loop
-			}
-		}
-		return iceCandidates
-	}
-	wsServerAddr := "localhost:8080"
-	go startWsServer(wsServerAddr, onGetOffer, onSendResponse)
-	fmt.Println("ws server started on", wsServerAddr)
-
-	// Assert that we have an audio or video file
-	_, err := os.Stat(videoFileName)
-	haveVideoFile := !os.IsNotExist(err)
-
-	_, err = os.Stat(audioFileName)
-	haveAudioFile := !os.IsNotExist(err)
-
-	if !haveAudioFile && !haveVideoFile {
-		panic("Could not find `" + audioFileName + "` or `" + videoFileName + "`")
-	}
 
 	// Create a new RTCPeerConnection
 	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{
@@ -77,144 +38,19 @@ func main() {
 		}
 	})
 
-	iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(context.Background())
-
-	if haveVideoFile {
-		// Create a video track
-		videoTrack, videoTrackErr := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: "video/vp8"}, "video", "pion")
-		if videoTrackErr != nil {
-			panic(videoTrackErr)
-		}
-
-		rtpSender, videoTrackErr := peerConnection.AddTrack(videoTrack)
-		if videoTrackErr != nil {
-			panic(videoTrackErr)
-		}
-
-		// Read incoming RTCP packets
-		// Before these packets are returned they are processed by interceptors. For things
-		// like NACK this needs to be called.
-		go func() {
-			rtcpBuf := make([]byte, 1500)
-			for {
-				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
-					return
-				}
-			}
-		}()
-
-		go func() {
-			// Open a IVF file and start reading using our IVFReader
-			file, ivfErr := os.Open(videoFileName)
-			if ivfErr != nil {
-				panic(ivfErr)
-			}
-
-			ivf, header, ivfErr := ivfreader.NewWith(file)
-			if ivfErr != nil {
-				panic(ivfErr)
-			}
-
-			// Wait for connection established
-			<-iceConnectedCtx.Done()
-
-			// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
-			// This isn't required since the video is timestamped, but we will such much higher loss if we send all at once.
-			sleepTime := time.Millisecond * time.Duration((float32(header.TimebaseNumerator)/float32(header.TimebaseDenominator))*1000)
-			for {
-				frame, _, ivfErr := ivf.ParseNextFrame()
-				if ivfErr == io.EOF {
-					fmt.Printf("All video frames parsed and sent")
-					os.Exit(0)
-				}
-
-				if ivfErr != nil {
-					panic(ivfErr)
-				}
-
-				time.Sleep(sleepTime)
-				if ivfErr = videoTrack.WriteSample(media.Sample{Data: frame, Duration: time.Second}); ivfErr != nil {
-					panic(ivfErr)
-				}
-			}
-		}()
-	}
-
-	if haveAudioFile {
-		// Create a audio track
-		audioTrack, audioTrackErr := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: "audio/opus"}, "audio", "pion")
-		if audioTrackErr != nil {
-			panic(audioTrackErr)
-		}
-
-		rtpSender, audioTrackErr := peerConnection.AddTrack(audioTrack)
-		if audioTrackErr != nil {
-			panic(audioTrackErr)
-		}
-
-		// Read incoming RTCP packets
-		// Before these packets are returned they are processed by interceptors. For things
-		// like NACK this needs to be called.
-		go func() {
-			rtcpBuf := make([]byte, 1500)
-			for {
-				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
-					return
-				}
-			}
-		}()
-
-		go func() {
-			// Open a IVF file and start reading using our IVFReader
-			file, oggErr := os.Open(audioFileName)
-			if oggErr != nil {
-				panic(oggErr)
-			}
-
-			// Open on oggfile in non-checksum mode.
-			ogg, _, oggErr := oggreader.NewWith(file)
-			if oggErr != nil {
-				panic(oggErr)
-			}
-
-			// Wait for connection established
-			<-iceConnectedCtx.Done()
-
-			// Keep track of last granule, the difference is the amount of samples in the buffer
-			var lastGranule uint64
-			for {
-				pageData, pageHeader, oggErr := ogg.ParseNextPage()
-				if oggErr == io.EOF {
-					fmt.Printf("All audio pages parsed and sent")
-					os.Exit(0)
-				}
-
-				if oggErr != nil {
-					panic(oggErr)
-				}
-
-				// The amount of samples is the difference between the last and current timestamp
-				sampleCount := float64(pageHeader.GranulePosition - lastGranule)
-				lastGranule = pageHeader.GranulePosition
-				sampleDuration := time.Duration((sampleCount/48000)*1000) * time.Millisecond
-
-				if oggErr = audioTrack.WriteSample(media.Sample{Data: pageData, Duration: sampleDuration}); oggErr != nil {
-					panic(oggErr)
-				}
-
-				time.Sleep(sampleDuration)
-			}
-		}()
-	}
+	// iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(context.Background())
 
 	// Set the handler for ICE connection state
 	// This will notify you when the peer has connected/disconnected
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		fmt.Printf("Connection State has changed %s \n", connectionState.String())
 		if connectionState == webrtc.ICEConnectionStateConnected {
-			iceConnectedCtxCancel()
+			// iceConnectedCtxCancel()
 		}
 	})
+
+	startServer(offerC, answerC, iceCandidateC)
+	startAudioAndVideo(peerConnection, videoFileName, audioFileName)
 
 	// Wait for the offer to be pasted
 	offer, err := peerConnection.CreateOffer(nil)
@@ -253,4 +89,98 @@ func main() {
 
 	// Block forever
 	select {}
+}
+
+func startServer(offerC, answerC chan webrtc.SessionDescription, iceCandidateC chan webrtc.ICECandidateInit) {
+	onGetOffer := func(req wowza.WsRequest) wowza.SdpContainer {
+		offer := <-offerC
+		return wowza.ConvertSessionDescription(offer)
+	}
+	onSendResponse := func(req wowza.WsRequest) []webrtc.ICECandidateInit {
+		answerC <- wowza.ConvertSdpContainer(req.Sdp)
+
+		iceCandidates := []webrtc.ICECandidateInit{}
+	Loop:
+		for {
+			select {
+			case ic := <-iceCandidateC:
+				iceCandidates = append(iceCandidates, ic)
+			default:
+				break Loop
+			}
+		}
+		return iceCandidates
+	}
+	wsServerAddr := "localhost:8080"
+	go startWsServer(wsServerAddr, onGetOffer, onSendResponse)
+	fmt.Println("ws server started on", wsServerAddr)
+}
+
+func startAudioAndVideo(pc *webrtc.PeerConnection, videoFile, audioFile string) {
+	_, err := os.Stat(videoFileName)
+	haveVideoFile := !os.IsNotExist(err)
+
+	_, err = os.Stat(audioFileName)
+	haveAudioFile := !os.IsNotExist(err)
+
+	if !haveAudioFile && !haveVideoFile {
+		panic("Could not find `" + audioFileName + "` or `" + videoFileName + "`")
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	if haveVideoFile {
+		// Create a video track
+		videoTrack, videoTrackErr := createVideoTrack()
+		if videoTrackErr != nil {
+			panic(videoTrackErr)
+		}
+
+		rtpSender, videoTrackErr := pc.AddTrack(videoTrack)
+		if videoTrackErr != nil {
+			panic(videoTrackErr)
+		}
+
+		// Read incoming RTCP packets
+		// Before these packets are returned they are processed by interceptors. For things
+		// like NACK this needs to be called.
+		go func() {
+			rtcpBuf := make([]byte, 1500)
+			for {
+				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+					return
+				}
+			}
+		}()
+
+		go streamVideo(videoFileName, videoTrack, &wg)
+	}
+
+	if haveAudioFile {
+		// Create a audio track
+		audioTrack, audioTrackErr := createAudioTrack()
+		if audioTrackErr != nil {
+			panic(audioTrackErr)
+		}
+
+		rtpSender, audioTrackErr := pc.AddTrack(audioTrack)
+		if audioTrackErr != nil {
+			panic(audioTrackErr)
+		}
+
+		// Read incoming RTCP packets
+		// Before these packets are returned they are processed by interceptors. For things
+		// like NACK this needs to be called.
+		go func() {
+			rtcpBuf := make([]byte, 1500)
+			for {
+				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+					return
+				}
+			}
+		}()
+
+		go streamAudio(audioFileName, audioTrack, &wg)
+	}
 }
